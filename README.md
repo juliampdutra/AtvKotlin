@@ -1,68 +1,82 @@
-# To-Do List
+# To-Do List — Atividade Individual (Android Development / FIAP)
 
-Aplicativo Android de lista de tarefas desenvolvido para a atividade de Sistemas de Informação da FIAP. Permite listar, criar, editar, concluir e excluir tarefas, com persistência local dos dados.
+## Descrição do projeto
 
-## Tecnologias
+Aplicativo Android de lista de tarefas (To-Do List) desenvolvido como atividade individual da disciplina de Android Development da FIAP. O objetivo da aplicação é permitir que o usuário **liste, crie, edite, conclua e exclua tarefas**, com persistência local dos dados e navegação entre a tela de listagem e o formulário de cadastro/edição.
 
-- Kotlin
-- Jetpack Compose (Material 3)
-- Room (SQLite)
-- Kotlin Coroutines + Flow
-- ViewModel
-- Navigation Compose
+A atividade consistiu em evoluir um projeto-base fornecido pelo professor, implementando a camada de apresentação (UI), a camada de ViewModel e a navegação entre telas, integrando tudo com a camada de dados já existente (Room).
 
-## Arquitetura (MVVM)
+## Tecnologias utilizadas
 
-```
-app/src/main/java/juliampdutra/com/gitub/to_do_list/
-├── data/          # Entity, DAO e configuração do banco (Room)
-├── repository/    # Abstrai o acesso a dados para a ViewModel
-├── viewmodel/     # Estado observável (StateFlow) e regras de apresentação
-├── ui/            # Telas em Jetpack Compose
-└── navigation/    # Rotas e navegação entre telas
-```
+- **Kotlin** — linguagem principal do projeto
+- **Jetpack Compose** — construção declarativa da interface
+- **Room** — persistência local dos dados (banco SQLite abstraído)
+- **Coroutines / Flow** — operações assíncronas e observação reativa dos dados
+- **ViewModel** (`androidx.lifecycle`) — gerenciamento de estado da UI
+- **Navigation Compose** — navegação entre as telas do app
 
-### TarefaRepository
+## Arquitetura da aplicação
 
-Fica em `repository/TarefaRepositoy.kt`. É a camada intermediária entre a `TarefaViewModel` e o `TarefaDao`: expõe a lista de tarefas como `Flow<List<Tarefa>>` e disponibiliza as operações de inserir, atualizar e deletar, delegando cada uma ao DAO.
+O projeto segue uma separação em camadas: **Data → Repository → ViewModel → UI → Navigation**.
 
-### TarefaViewModel
+### `TarefaRepository`
 
-Fica em `viewmodel/TarefaViewModel.kt`. Consome o `TarefaRepository` e transforma o `Flow` em um `StateFlow` (`tarefas`), que a UI observa. Expõe as funções `inserir`, `atualizar` e `deletar`, cada uma disparada em `viewModelScope.launch` para rodar em coroutine. Como não há Hilt/Koin, a instância é criada por uma `Factory` manual (`TarefaViewModel.factory(context)`), que monta o banco, o repository e a própria ViewModel.
+Fica em `repository/TarefaRepositoy.kt`. É a camada responsável por abstrair o acesso aos dados: expõe um `Flow<List<Tarefa>>` vindo do `TarefaDao` e disponibiliza as operações suspensas de `inserir`, `atualizar` e `deletar`. A ViewModel não conhece o `TarefaDao` diretamente — ela conversa só com o Repository, o que isola a camada de dados do restante da aplicação.
 
-### ListaTarefasScreen
+### `TarefaViewModel`
 
-Fica em `ui/ListaTarefasScreen.kt`. Observa `viewModel.tarefas` via `collectAsStateWithLifecycle()` e recompõe a tela sempre que a lista muda. Exibe as tarefas em `LazyColumn`; cada item tem um `Checkbox` (marca/desmarca conclusão), um botão de deletar, e um clique que abre a edição. Um `FloatingActionButton` aciona o cadastro de nova tarefa.
+Fica em `viewmodel/TarefaViewModel.kt`. É responsável por manter o estado da lista de tarefas como um `StateFlow<List<Tarefa>>`, convertendo o `Flow` do Repository com `stateIn` (compartilhado entre observadores, com timeout de 5 segundos após perder todos os coletores). Expõe as funções `inserir`, `atualizar` e `deletar`, cada uma disparando uma coroutine em `viewModelScope`. Também define uma `Factory` (`TarefaViewModel.factory(context)`) que instancia o `TarefaRepository` a partir do `TarefaDatabase`, permitindo que a `MainActivity` crie a ViewModel corretamente via `viewModel(factory = ...)`.
 
-### FormularioTarefaScreen
+### `ListaTarefasScreen`
 
-Fica em `ui/FormularioTarefaScreen.kt`. Recebe um `tarefaId`: se for `0`, está em modo cadastro (campos vazios); se for diferente de `0`, busca a tarefa correspondente na lista da ViewModel e preenche os campos com os dados existentes (modo edição). Ao salvar, decide entre `inserir` ou `atualizar` com base nesse mesmo `tarefaId`.
+Fica em `ui/ListaTarefasScreen.kt`. Observa o estado `tarefas` da ViewModel com `collectAsStateWithLifecycle()` e repassa para o `ListaTarefasContent`, que exibe a lista em uma `LazyColumn`. Cada item (`TarefaItem`) tem um `Checkbox` para marcar/desmarcar como concluída (disparando `viewModel.atualizar`), um botão de exclusão (disparando `viewModel.deletar`) e é clicável para abrir a edição (`onEditarTarefa`). Um `FloatingActionButton` aciona `onNovaTarefa` para abrir o formulário de cadastro. A tela trata o caso de lista vazia exibindo uma mensagem, e conta com `@Preview`s tanto para o estado com tarefas quanto vazio.
 
-### AppNavigation
+### `FormularioTarefaScreen`
 
-Fica em `navigation/AppNavigation.kt`. Usa `NavHost` com duas rotas:
-- `"lista"` — tela inicial
-- `"formulario/{tarefaId}"` — recebe o ID da tarefa pela própria rota (`0` para nova tarefa, ou o ID real para edição)
+Fica em `ui/FormularioTarefaScreen.kt`. Atende tanto o cadastro quanto a edição de tarefas a partir de um único componente. Recebe o `tarefaId`: quando é `0`, está em modo de criação; quando é diferente de `0`, busca a tarefa correspondente na lista observada da ViewModel e pré-preenche os campos de título e descrição. Ao salvar, decide entre `viewModel.inserir` (nova tarefa) ou `viewModel.atualizar` (edição), e retorna para a tela anterior via `onVoltar`. Conta com `@Preview`s para os dois modos (nova tarefa e edição).
 
-Ambas as telas compartilham a mesma instância de `TarefaViewModel`, recebida como parâmetro.
+### `AppNavigation`
 
-### MainActivity
+Fica em `navigation/AppNavigation.kt`. Define um `NavHost` com duas rotas:
+- `"lista"` — tela inicial, renderiza `ListaTarefasScreen`
+- `"formulario/{tarefaId}"` — renderiza `FormularioTarefaScreen`, recebendo o `tarefaId` como argumento de navegação
 
-Cria a `TarefaViewModel` usando sua `Factory` (via `viewModel(factory = ...)`) e inicia o app chamando `AppNavigation(viewModel = viewModel)` dentro do `TodolistTheme`. Não usa mais a tela de exemplo gerada pelo template do Android Studio.
+A navegação para o formulário de nova tarefa usa `"formulario/0"`, enquanto a edição usa `"formulario/$id"` com o ID real da tarefa. Dentro do formulário, o argumento é lido de `backStackEntry.arguments` e convertido para `Int`.
 
-## Como executar
+### `MainActivity`
 
-1. Abra a pasta do projeto no Android Studio e aguarde a sincronização do Gradle.
-2. Selecione um emulador (API 24+) ou conecte um dispositivo físico.
-3. Clique em **Run ▶**.
+Fica na raiz do pacote (`MainActivity.kt`). Substitui o conteúdo padrão gerado pelo template do Android Studio: dentro do `setContent`, cria a `TarefaViewModel` usando `viewModel(factory = TarefaViewModel.factory(applicationContext))` e passa essa instância para o `AppNavigation`, que assume o controle total da navegação do app a partir da tela de listagem.
 
-## Testes
+## Como executar o projeto
 
-```bash
-./gradlew test                  # testes unitários
-./gradlew connectedAndroidTest  # testes instrumentados (TarefaDaoTest), requer emulador/dispositivo
-```
+1. Clone este repositório.
+2. Abra a pasta do projeto no Android Studio.
+3. Aguarde a sincronização do Gradle (as dependências de Room, Navigation Compose e Compose BOM já estão configuradas em `libs.versions.toml` e `app/build.gradle.kts`).
+4. Rode o app em um emulador ou dispositivo físico com Android 7.0 (API 24) ou superior.
+5. Ao abrir, o app exibe a lista de tarefas (vazia na primeira execução). Use o botão flutuante (+) para cadastrar a primeira tarefa.
 
 ## Evidências
 
-As evidências de execução (telas de listagem, cadastro, edição, conclusão, exclusão e navegação) estão em [`docs/evidencias`](docs/evidencias).
+### Tela inicial com a lista de tarefas
+![Página inicial](docs/evidencias/Pagina%20inicial.png)
+
+### Cadastro de uma nova tarefa
+![Adicionar tarefa](docs/evidencias/Adicionar%20Tarefa.png)
+
+### Tarefa cadastrada aparecendo na lista
+![Tarefa adicionada à página inicial](docs/evidencias/Tarefa%20adicionada%20a%20pagina%20inicial.png)
+
+### Edição de uma tarefa existente
+![Editar tarefa](docs/evidencias/Editar%20tarefa.png)
+
+### Tarefa marcada como concluída
+![Tarefa concluída](docs/evidencias/Tarefa%20Concluida.png)
+
+### Exclusão de uma tarefa
+![Página quando exclui uma tarefa](docs/evidencias/Pagina%20quando%20exclui%20uma%20tarefa.png)
+
+### Navegação entre lista e formulário
+![Navegando para editar tarefa](docs/evidencias/Pagina%20nagevando%20para%20o%20editar%20tarefa.png)
+
+### Build/execução sem erros
+![Build com sucesso](docs/evidencias/build.sucesso.png)
